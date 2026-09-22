@@ -1,3 +1,26 @@
-[app.js](https://github.com/user-attachments/files/32524123/app.js)
-[index.html](https://github.com/user-attachments/files/32524124/index.html)[style.css](https://github.com/user-attachments/files/32524126/style.css)
-[README.md](https://github.com/user-attachments/files/32524125/README.md)
+# VoiceMatch MVP v2
+
+## 포함 기능
+- 연습곡 선택
+- -6 ~ +6 반음 키 조절
+- 브라우저 합성 반주
+- 마이크 입력
+- 기본 음정/음량/음색 밝기 추정
+- 피치 흐름 그래프
+- 간단한 음역/안정성/중심음 추정
+- 연습곡 추천
+- 기본 보컬 피드백
+
+## 실행
+GitHub Pages처럼 HTTPS 환경에서 실행하는 것을 권장합니다.
+마이크는 브라우저 권한이 필요합니다.
+
+## 다음 개발 단계
+1. 목표 멜로디 MIDI/피치 곡선 추가
+2. 사용자 음정과 목표 멜로디 실시간 비교
+3. 정확한 키/음역 분석 개선
+4. 호흡·프레이즈 분석
+5. 권리 확보된 반주 파일의 키 변경
+6. 한국어/일본어/영어 곡 DB 및 라이선스 정보 관리
+
+주의: 이 MVP의 분석 결과는 참고용 추정치이며 전문적인 음성/의학적 진단이 아닙니다.
