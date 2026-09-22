@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VoiceMatch v2 - 목소리에 맞는 노래 추천</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div class="badge">VOICE MATCH v2</div>
+      <h1>내 목소리에 맞는<br><span>노래를 찾아보세요 🎤</span></h1>
+      <p>10초 동안 편하게 노래하거나 한 음을 길게 내보세요.</p>
+    </header>
+
+    <section class="card recorder-card">
+      <div class="timer" id="timer">00:10</div>
+      <div class="status" id="status">녹음 준비 완료</div>
+
+      <div class="meter">
+        <div id="meterBar"></div>
+      </div>
+
+      <button id="recordBtn" class="record-btn">
+        <span class="record-dot"></span>
+        녹음 시작
+      </button>
+      <button id="stopBtn" class="secondary-btn" disabled>녹음 중지</button>
+
+      <audio id="audio" controls hidden></audio>
+      <p class="hint">※ 조용한 곳에서 한 음씩 또렷하게 내거나 짧게 노래하면 분석이 더 안정적입니다.</p>
+    </section>
+
+    <section id="result" class="card result-card" hidden>
+      <h2>내 목소리 분석</h2>
+
+      <div class="stats">
+        <div><span>평균 음높이</span><strong id="avgPitch">-</strong></div>
+        <div><span>추정 음역</span><strong id="range">-</strong></div>
+        <div><span>음정 안정성</span><strong id="stability">-</strong></div>
+        <div><span>음색 경향</span><strong id="timbre">-</strong></div>
+      </div>
+
+      <div class="voice-bar-wrap">
+        <div class="bar-label"><span>낮은 음</span><span>높은 음</span></div>
+        <div class="voice-bar"><div id="voiceBar"></div></div>
+      </div>
+
+      <div class="recommend-title">
+        <h2>추천 노래 🎵</h2>
+        <p id="recommendReason"></p>
+      </div>
+
+      <div id="songs" class="songs"></div>
+
+      <button id="againBtn" class="secondary-btn">다시 녹음하기</button>
+    </section>
+
+    <footer>
+      <p>VoiceMatch v2 · 음성은 브라우저 안에서 분석합니다.</p>
+      <p class="small">※ 음역·곡 데이터는 프로토타입용 근사값이며 실제 가창 난이도와 다를 수 있습니다.</p>
+    </footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

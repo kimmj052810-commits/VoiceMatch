@@ -1,0 +1,364 @@
+const recordBtn = document.getElementById("recordBtn");
+const stopBtn = document.getElementById("stopBtn");
+const timerEl = document.getElementById("timer");
+const statusEl = document.getElementById("status");
+const meterBar = document.getElementById("meterBar");
+const audioEl = document.getElementById("audio");
+const resultEl = document.getElementById("result");
+const againBtn = document.getElementById("againBtn");
+
+const avgPitchEl = document.getElementById("avgPitch");
+const rangeEl = document.getElementById("range");
+const stabilityEl = document.getElementById("stability");
+const timbreEl = document.getElementById("timbre");
+const voiceBarEl = document.getElementById("voiceBar");
+const songsEl = document.getElementById("songs");
+const reasonEl = document.getElementById("recommendReason");
+
+let mediaRecorder;
+let audioChunks = [];
+let audioContext;
+let analyser;
+let source;
+let animationId;
+let pitchSamples = [];
+let spectralCentroids = [];
+let startedAt = 0;
+let timerId;
+
+const MAX_SECONDS = 10;
+
+/*
+  프로토타입용 곡 데이터.
+  min/max는 정확한 공식 음역 DB가 아니라 추천 알고리즘 테스트를 위한 근사값입니다.
+  실제 서비스에서는 검증된 곡 메타데이터 DB로 교체하면 됩니다.
+*/
+const songs = [
+  { title:"밤편지", artist:"아이유", min:196, max:494, genre:"발라드", preferred:"밝음", baseKey:0 },
+  { title:"너의 모든 순간", artist:"성시경", min:147, max:440, genre:"발라드", preferred:"차분함", baseKey:0 },
+  { title:"좋니", artist:"윤종신", min:147, max:494, genre:"발라드", preferred:"차분함", baseKey:0 },
+  { title:"Love wins all", artist:"아이유", min:196, max:523, genre:"발라드", preferred:"밝음", baseKey:0 },
+  { title:"사건의 지평선", artist:"윤하", min:196, max:784, genre:"록/발라드", preferred:"밝음", baseKey:0 },
+  { title:"Dynamite", artist:"BTS", min:165, max:494, genre:"팝", preferred:"밝음", baseKey:0 },
+  { title:"너를 만나", artist:"폴킴", min:147, max:440, genre:"발라드", preferred:"차분함", baseKey:0 },
+  { title:"한숨", artist:"이하이", min:165, max:440, genre:"발라드", preferred:"차분함", baseKey:0 },
+  { title:"폰서트", artist:"10CM", min:165, max:494, genre:"어쿠스틱", preferred:"밝음", baseKey:0 },
+  { title:"봄날", artist:"BTS", min:147, max:494, genre:"팝/발라드", preferred:"차분함", baseKey:0 },
+  { title:"그대라는 시", artist:"태연", min:196, max:523, genre:"발라드", preferred:"밝음", baseKey:0 },
+  { title:"서랍", artist:"10CM", min:165, max:440, genre:"어쿠스틱", preferred:"차분함", baseKey:0 },
+  { title:"취중고백", artist:"김민석", min:147, max:440, genre:"발라드", preferred:"차분함", baseKey:0 },
+  { title:"사랑은 늘 도망가", artist:"임영웅", min:147, max:494, genre:"발라드", preferred:"차분함", baseKey:0 },
+  { title:"인사", artist:"범진", min:165, max:494, genre:"발라드", preferred:"차분함", baseKey:0 },
+  { title:"헤어지자 말해요", artist:"박재정", min:147, max:494, genre:"발라드", preferred:"차분함", baseKey:0 },
+  { title:"다시 사랑한다면", artist:"김필", min:147, max:494, genre:"발라드", preferred:"차분함", baseKey:0 },
+  { title:"2002", artist:"Anne-Marie", min:196, max:659, genre:"팝", preferred:"밝음", baseKey:0 },
+  { title:"Perfect", artist:"Ed Sheeran", min:147, max:494, genre:"팝", preferred:"차분함", baseKey:0 }
+];
+
+recordBtn.addEventListener("click", startRecording);
+stopBtn.addEventListener("click", stopRecording);
+againBtn.addEventListener("click", resetApp);
+
+async function startRecording() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    alert("이 브라우저에서는 마이크 녹음을 사용할 수 없습니다. Chrome 또는 Edge의 HTTPS/localhost 환경에서 실행해 주세요.");
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
+    audioChunks = [];
+    pitchSamples = [];
+    spectralCentroids = [];
+    startedAt = Date.now();
+
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = e => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach(track => track.stop());
+      const blob = new Blob(audioChunks, { type:mediaRecorder.mimeType || "audio/webm" });
+      audioEl.src = URL.createObjectURL(blob);
+      audioEl.hidden = false;
+      statusEl.textContent = "목소리 특징을 분석하는 중...";
+      await new Promise(r => setTimeout(r, 250));
+      analyzeVoice();
+    };
+
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.35;
+
+    source = audioContext.createMediaStreamSource(stream);
+    source.connect(analyser);
+
+    mediaRecorder.start();
+    recordBtn.disabled = true;
+    stopBtn.disabled = false;
+    resultEl.hidden = true;
+    statusEl.textContent = "녹음 중... 편하게 노래해 보세요.";
+    updateAnalysis();
+
+    timerId = setInterval(() => {
+      const elapsed = (Date.now() - startedAt) / 1000;
+      const remaining = Math.max(0, MAX_SECONDS - elapsed);
+      timerEl.textContent = `00:${String(Math.ceil(remaining)).padStart(2,"0")}`;
+      meterBar.style.width = `${Math.min(100, elapsed / MAX_SECONDS * 100)}%`;
+      if (elapsed >= MAX_SECONDS) stopRecording();
+    }, 100);
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "마이크 권한을 허용한 뒤 다시 시도해 주세요.";
+  }
+}
+
+function stopRecording() {
+  if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+
+  clearInterval(timerId);
+  cancelAnimationFrame(animationId);
+  mediaRecorder.stop();
+
+  if (audioContext) {
+    audioContext.close();
+    audioContext = null;
+  }
+
+  recordBtn.disabled = false;
+  stopBtn.disabled = true;
+  timerEl.textContent = "00:00";
+  meterBar.style.width = "100%";
+}
+
+function updateAnalysis() {
+  if (!analyser) return;
+
+  const timeData = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(timeData);
+
+  let rms = 0;
+  for (const x of timeData) rms += x * x;
+  rms = Math.sqrt(rms / timeData.length);
+
+  meterBar.style.width = `${Math.min(100, rms * 500)}%`;
+
+  if (rms > 0.015) {
+    const pitch = autoCorrelate(timeData, audioContext.sampleRate);
+    if (pitch > 70 && pitch < 1000) pitchSamples.push(pitch);
+
+    spectralCentroids.push(getSpectralCentroid(timeData, audioContext.sampleRate));
+  }
+
+  animationId = requestAnimationFrame(updateAnalysis);
+}
+
+function autoCorrelate(buffer, sampleRate) {
+  let rms = 0;
+  for (let i = 0; i < buffer.length; i++) rms += buffer[i] * buffer[i];
+  rms = Math.sqrt(rms / buffer.length);
+  if (rms < 0.01) return -1;
+
+  let bestOffset = -1;
+  let bestCorrelation = 0;
+  const minFreq = 70, maxFreq = 1000;
+  const minOffset = Math.floor(sampleRate / maxFreq);
+  const maxOffset = Math.floor(sampleRate / minFreq);
+
+  for (let offset = minOffset; offset <= maxOffset && offset < buffer.length; offset++) {
+    let correlation = 0;
+    for (let i = 0; i < buffer.length - offset; i++) {
+      correlation += buffer[i] * buffer[i + offset];
+    }
+    correlation /= (buffer.length - offset);
+
+    if (correlation > bestCorrelation) {
+      bestCorrelation = correlation;
+      bestOffset = offset;
+    }
+  }
+
+  if (bestOffset === -1 || bestCorrelation < 0.01) return -1;
+  return sampleRate / bestOffset;
+}
+
+function getSpectralCentroid(timeData, sampleRate) {
+  // 빠른 프로토타입용: FFT 결과의 주파수 가중 평균
+  const n = timeData.length;
+  const real = new Float32Array(n);
+  const imag = new Float32Array(n);
+  for (let i = 0; i < n; i++) real[i] = timeData[i];
+
+  // DFT 일부 구간만 사용해 계산량 제한
+  const bins = Math.min(128, Math.floor(n / 2));
+  let weighted = 0, magnitudeSum = 0;
+
+  for (let k = 1; k <= bins; k++) {
+    let re = 0, im = 0;
+    const step = Math.max(1, Math.floor(n / 512));
+    for (let t = 0; t < n; t += step) {
+      const angle = 2 * Math.PI * k * t / n;
+      re += real[t] * Math.cos(angle);
+      im -= real[t] * Math.sin(angle);
+    }
+    const mag = Math.sqrt(re * re + im * im);
+    const freq = k * sampleRate / n;
+    weighted += freq * mag;
+    magnitudeSum += mag;
+  }
+  return magnitudeSum ? weighted / magnitudeSum : 0;
+}
+
+function analyzeVoice() {
+  if (pitchSamples.length < 5) {
+    statusEl.textContent = "분석할 음정 데이터가 부족합니다.";
+    alert("조금 더 크게, 가능하면 일정한 음을 포함해 다시 녹음해 주세요.");
+    return;
+  }
+
+  const sorted = [...pitchSamples].sort((a,b) => a-b);
+  const clean = sorted.slice(Math.floor(sorted.length * .05), Math.ceil(sorted.length * .95));
+  const avg = mean(clean);
+  const min = clean[0];
+  const max = clean[clean.length - 1];
+
+  const median = clean[Math.floor(clean.length / 2)];
+  const cents = clean.map(p => 1200 * Math.log2(p / median));
+  const sdCents = standardDeviation(cents);
+  const stability = Math.max(0, Math.min(100, 100 - sdCents * 2.4));
+
+  const centroid = mean(spectralCentroids);
+  const timbre = classifyTimbre(centroid);
+
+  avgPitchEl.textContent = `${Math.round(avg)} Hz`;
+  rangeEl.textContent = `${noteName(min)} ~ ${noteName(max)}`;
+  stabilityEl.textContent = `${Math.round(stability)}%`;
+  timbreEl.textContent = timbre.label;
+
+  // 70~1000Hz 범위를 화면 막대에 표시
+  const left = Math.max(0, Math.min(100, (min - 70) / 930 * 100));
+  const right = Math.max(left, Math.min(100, (max - 70) / 930 * 100));
+  voiceBarEl.style.marginLeft = `${left}%`;
+  voiceBarEl.style.width = `${Math.max(2, right-left)}%`;
+
+  const recommendations = recommendSongs(min, max, timbre.type);
+  renderSongs(recommendations);
+
+  reasonEl.textContent =
+    `음역, 음정 안정성(${Math.round(stability)}%), 음색 경향(${timbre.label})을 함께 반영했습니다. 추천 키는 현재 측정된 음역에 곡을 맞추기 위한 프로토타입 계산입니다.`;
+
+  statusEl.textContent = "분석 완료!";
+  resultEl.hidden = false;
+  resultEl.scrollIntoView({ behavior:"smooth", block:"start" });
+}
+
+function classifyTimbre(centroid) {
+  // 사람의 음색을 정확히 판별하는 모델이 아니라, 밝기 경향을 보는 단순 지표
+  if (centroid < 900) return { label:"차분한 편", type:"차분함" };
+  if (centroid > 1500) return { label:"밝은 편", type:"밝음" };
+  return { label:"중간", type:"중간" };
+}
+
+function recommendSongs(userMin, userMax, timbreType) {
+  const userSpan = userMax - userMin;
+
+  return songs.map(song => {
+    const overlapMin = Math.max(userMin, song.min);
+    const overlapMax = Math.min(userMax, song.max);
+    const overlap = Math.max(0, overlapMax - overlapMin);
+
+    const coverage = overlap / Math.max(1, Math.min(userSpan, song.max-song.min));
+    const distance = Math.abs(userMin-song.min) + Math.abs(userMax-song.max);
+    const timbreBonus = timbreType === "중간" || song.preferred === timbreType ? 8 : 0;
+
+    let score = coverage * 65 + Math.max(0, 25-distance/20) + timbreBonus;
+
+    // 현재 음역보다 곡이 지나치게 넓으면 부담 가능성을 조금 반영
+    if ((song.max-song.min) > userSpan * 1.8) score -= 8;
+
+    const keyShift = findBestKeyShift(userMin, userMax, song.min, song.max);
+    const keyText = keyShift === 0 ? "원키" : `${keyShift > 0 ? "+" : ""}${keyShift}키`;
+
+    return { ...song, score:Math.max(0,Math.min(99,score)), keyShift, keyText };
+  }).sort((a,b) => b.score-a.score).slice(0,10);
+}
+
+function findBestKeyShift(userMin, userMax, songMin, songMax) {
+  let best = 0;
+  let bestPenalty = Infinity;
+
+  for (let shift=-6; shift<=6; shift++) {
+    const factor = Math.pow(2, shift/12);
+    const shiftedMin = songMin * factor;
+    const shiftedMax = songMax * factor;
+
+    const outsideLow = Math.max(0, userMin-shiftedMin);
+    const outsideHigh = Math.max(0, shiftedMax-userMax);
+    const centerPenalty = Math.abs(((shiftedMin+shiftedMax)/2) - ((userMin+userMax)/2)) / 30;
+    const penalty = outsideLow + outsideHigh + centerPenalty;
+
+    if (penalty < bestPenalty) {
+      bestPenalty = penalty;
+      best = shift;
+    }
+  }
+  return best;
+}
+
+function renderSongs(recommendations) {
+  songsEl.innerHTML = recommendations.map((song,i) => `
+    <div class="song">
+      <div class="rank">${i+1}</div>
+      <div class="song-info">
+        <strong>${escapeHtml(song.title)}</strong>
+        <span>${escapeHtml(song.artist)} · ${escapeHtml(song.genre)}</span>
+      </div>
+      <div class="song-meta">
+        <div class="match">${Math.round(song.score)}% MATCH</div>
+        <div class="key">추천 키: ${escapeHtml(song.keyText)}</div>
+      </div>
+    </div>
+  `).join("");
+}
+
+function noteName(freq) {
+  const midi = Math.round(69 + 12*Math.log2(freq/440));
+  const names = ["도","도♯","레","레♯","미","파","파♯","솔","솔♯","라","라♯","시"];
+  const index = ((midi%12)+12)%12;
+  const octave = Math.floor(midi/12)-1;
+  return `${names[index]}${octave}`;
+}
+
+function mean(arr) {
+  return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
+}
+
+function standardDeviation(arr) {
+  if (arr.length < 2) return 0;
+  const m = mean(arr);
+  return Math.sqrt(mean(arr.map(x => (x-m)**2)));
+}
+
+function resetApp() {
+  resultEl.hidden = true;
+  audioEl.hidden = true;
+  audioEl.removeAttribute("src");
+  pitchSamples = [];
+  spectralCentroids = [];
+  meterBar.style.width = "0%";
+  voiceBarEl.style.marginLeft = "0%";
+  voiceBarEl.style.width = "0%";
+  timerEl.textContent = "00:10";
+  statusEl.textContent = "녹음 준비 완료";
+  recordBtn.disabled = false;
+  stopBtn.disabled = true;
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
